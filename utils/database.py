@@ -74,38 +74,65 @@ def _migrate_schema(conn):
             conn.execute(ddl)
 
 
+def _row_to_tuple(r, now):
+    return (
+        r["nama"], r["kategori"], r["kabupaten_kota"], r.get("deskripsi", ""),
+        r.get("harga_tiket", ""), r.get("jam_operasional", ""), r.get("fasilitas", ""),
+        float(r.get("rating", 4.0)) if not pd.isna(r.get("rating", 4.0)) else 4.0,
+        float(r.get("latitude")) if not pd.isna(r.get("latitude")) else None,
+        float(r.get("longitude")) if not pd.isna(r.get("longitude")) else None,
+        r.get("kontak", ""), r.get("tips", ""),
+        r.get("foto_url", "") if not pd.isna(r.get("foto_url", "")) else "",
+        r.get("foto_kredit", "") if not pd.isna(r.get("foto_kredit", "")) else "",
+        "aktif", now, now
+    )
+
+
+_INSERT_SQL = """INSERT INTO destinasi
+   (nama, kategori, kabupaten_kota, deskripsi, harga_tiket, jam_operasional,
+    fasilitas, rating, latitude, longitude, kontak, tips, foto_url, foto_kredit,
+    status, created_at, updated_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+
+
 def init_db():
-    """Inisialisasi database. Jika kosong, isi dengan data awal (seed) dari CSV."""
+    """
+    Inisialisasi database. Jika kosong, isi penuh dengan data awal (seed) dari CSV.
+    Jika database SUDAH ADA ISINYA (misalnya dari deployment sebelumnya dengan dataset
+    yang lebih sedikit), fungsi ini tetap mengecek dan menambahkan destinasi seed yang
+    BELUM ada (dicocokkan berdasarkan nama) — sehingga pembaruan dataset otomatis
+    tersinkron tanpa menghapus atau menimpa data yang sudah diedit/ditambahkan admin.
+    """
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with get_connection() as conn:
         conn.executescript(SCHEMA)
         _migrate_schema(conn)
-        count = conn.execute("SELECT COUNT(*) AS c FROM destinasi").fetchone()["c"]
-        if count == 0 and os.path.exists(SEED_CSV_PATH):
-            seed_df = pd.read_csv(SEED_CSV_PATH)
-            now = datetime.now().isoformat(timespec="seconds")
-            rows = []
-            for _, r in seed_df.iterrows():
-                rows.append((
-                    r["nama"], r["kategori"], r["kabupaten_kota"], r.get("deskripsi", ""),
-                    r.get("harga_tiket", ""), r.get("jam_operasional", ""), r.get("fasilitas", ""),
-                    float(r.get("rating", 4.0)) if not pd.isna(r.get("rating", 4.0)) else 4.0,
-                    float(r.get("latitude")) if not pd.isna(r.get("latitude")) else None,
-                    float(r.get("longitude")) if not pd.isna(r.get("longitude")) else None,
-                    r.get("kontak", ""), r.get("tips", ""),
-                    r.get("foto_url", "") if not pd.isna(r.get("foto_url", "")) else "",
-                    r.get("foto_kredit", "") if not pd.isna(r.get("foto_kredit", "")) else "",
-                    "aktif", now, now
-                ))
-            conn.executemany(
-                """INSERT INTO destinasi
-                   (nama, kategori, kabupaten_kota, deskripsi, harga_tiket, jam_operasional,
-                    fasilitas, rating, latitude, longitude, kontak, tips, foto_url, foto_kredit,
-                    status, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                rows
-            )
+
+        if not os.path.exists(SEED_CSV_PATH):
+            return
+
+        seed_df = pd.read_csv(SEED_CSV_PATH)
+        now = datetime.now().isoformat(timespec="seconds")
+
+        existing_names = {
+            row["nama"] for row in conn.execute("SELECT nama FROM destinasi").fetchall()
+        }
+
+        if not existing_names:
+            # Database benar-benar kosong -> muat seluruh seed data
+            rows = [_row_to_tuple(r, now) for _, r in seed_df.iterrows()]
+            conn.executemany(_INSERT_SQL, rows)
             log_activity(conn, "seed_data", f"Memuat {len(rows)} destinasi awal dari dataset seed")
+        else:
+            # Database sudah ada isinya -> hanya tambahkan destinasi seed yang belum ada
+            missing = seed_df[~seed_df["nama"].isin(existing_names)]
+            if not missing.empty:
+                rows = [_row_to_tuple(r, now) for _, r in missing.iterrows()]
+                conn.executemany(_INSERT_SQL, rows)
+                log_activity(
+                    conn, "sinkronisasi_seed",
+                    f"Menyinkronkan {len(rows)} destinasi baru dari pembaruan dataset seed"
+                )
 
 
 def log_activity(conn, aksi, detail):

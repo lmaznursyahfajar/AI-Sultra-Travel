@@ -7,7 +7,7 @@ kontrol layar penuh, dan pilihan tampilan peta jalan/satelit/topografi.
 import json
 import uuid
 import pandas as pd
-import streamlit.components.v1 as components
+import streamlit as st
 from .photo_utils import get_photo
 from .database import KATEGORI_LABELS
 
@@ -330,4 +330,14 @@ def render_interactive_map(destinations_df: pd.DataFrame, user_location=None, he
         .replace("___ZOOM___", str(zoom))
         .replace("___LEGEND___", _build_legend_html())
     )
-    components.html(html, height=height + 20, scrolling=False)
+    _render_html(html, height=height + 20)
+
+
+def _render_html(html: str, height: int):
+    """Merender HTML mentah, memakai st.iframe bila tersedia (Streamlit terbaru)
+    dan otomatis beralih ke st.components.v1.html pada versi Streamlit yang lebih lama."""
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=height, width="stretch")
+    else:
+        import streamlit.components.v1 as components
+        components.html(html, height=height, scrolling=False)

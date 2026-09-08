@@ -66,6 +66,9 @@ BASE_CSS = f"""
         margin-bottom: 16px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.07);
         transition: transform 0.18s ease, box-shadow 0.18s ease;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
     }}
     .dest-card:hover {{
         transform: translateY(-3px);
@@ -77,14 +80,34 @@ BASE_CSS = f"""
         object-fit: cover;
         display: block;
         background: #e5ecec;
+        flex-shrink: 0;
     }}
     .dest-card-body {{
         padding: 14px 18px 16px 18px;
         border-top: 3px solid {SECONDARY};
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
     }}
     .dest-card-body h4 {{
         margin: 0 0 6px 0;
         color: {PRIMARY};
+        font-size: 1.02rem;
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }}
+    .dest-card-desc {{
+        color: #556;
+        font-size: 0.87rem;
+        margin-top: 6px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        flex-grow: 1;
     }}
     .photo-credit {{
         font-size: 0.68rem;
@@ -104,6 +127,42 @@ BASE_CSS = f"""
     .badge-amber {{
         background: {ACCENT}22;
         color: #96650f;
+    }}
+    .cat-chip {{
+        display: inline-block;
+        padding: 7px 16px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin: 3px 6px 3px 0;
+        border: 1.5px solid {SECONDARY}55;
+        color: {PRIMARY};
+        background: white;
+    }}
+    .cat-chip-active {{
+        background: {PRIMARY};
+        color: white;
+        border-color: {PRIMARY};
+    }}
+    .results-count {{
+        color: #667;
+        font-size: 0.88rem;
+        margin: 4px 0 12px 0;
+    }}
+    .kab-pill {{
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        background: white;
+        border-radius: 10px;
+        padding: 9px 14px;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+        font-size: 0.86rem;
+        color: {TEXT_DARK};
+    }}
+    .kab-pill b {{
+        color: {SECONDARY};
     }}
     .chat-bubble-user {{
         background: {PRIMARY};
@@ -167,21 +226,61 @@ def destination_card(row, kategori_labels, extra_info_html: str = "", show_tips:
 
     emoji, label = kategori_labels.get(row.get("kategori"), ("📍", row.get("kategori", "-")))
     photo = get_photo(row)
-    deskripsi = str(row.get("deskripsi", "") or "")[:130]
+    deskripsi = str(row.get("deskripsi", "") or "")
 
     st.markdown(
         f"""<div class="dest-card">
         <img class="dest-card-photo" src="{photo['url']}" loading="lazy"
              onerror="this.style.display='none'"/>
         <div class="dest-card-body">
-        <h4>{emoji} {row.get('nama','')}</h4>
+        <h4 title="{row.get('nama','')}">{emoji} {row.get('nama','')}</h4>
         <span class="badge">{label}</span>
         <span class="badge badge-amber">⭐ {row.get('rating','-')}</span>
         <p style="margin-top:8px; color:#445; font-size:0.9rem;">
         📍 {row.get('kabupaten_kota','-')} • 💰 {row.get('harga_tiket','-')}{extra_info_html}</p>
-        <p style="color:#556; font-size:0.87rem;">{deskripsi}{'...' if deskripsi else ''}</p>
+        <p class="dest-card-desc">{deskripsi}</p>
         </div></div>""",
         unsafe_allow_html=True,
     )
     if photo.get("credit"):
         st.markdown(f"""<div class="photo-credit">{photo['credit']}</div>""", unsafe_allow_html=True)
+
+
+def category_chips_html(kategori_labels: dict, counts: dict, active_key: str = None) -> str:
+    """Menghasilkan HTML baris chip kategori (indikator visual, bukan tombol interaktif)."""
+    chips = [
+        f'<span class="cat-chip{" cat-chip-active" if active_key == "__all__" else ""}">🗺️ Semua ({sum(counts.values())})</span>'
+    ]
+    for key, (emoji, label) in kategori_labels.items():
+        active = " cat-chip-active" if key == active_key else ""
+        chips.append(f'<span class="cat-chip{active}">{emoji} {label} ({counts.get(key, 0)})</span>')
+    return '<div style="margin-bottom:10px;">' + "".join(chips) + "</div>"
+
+
+def paginate(items_count: int, page_size: int, state_key: str) -> tuple:
+    """
+    Komponen pagination sederhana. Mengembalikan (start_index, end_index, current_page).
+    Menyimpan halaman aktif di st.session_state[state_key].
+    """
+    total_pages = max(1, (items_count + page_size - 1) // page_size)
+    current = st.session_state.get(state_key, 1)
+    current = min(max(1, current), total_pages)
+
+    if total_pages > 1:
+        col_prev, col_mid, col_next = st.columns([1, 3, 1])
+        with col_prev:
+            if st.button("⬅️ Sebelumnya", disabled=(current <= 1), key=f"{state_key}_prev", use_container_width=True):
+                current -= 1
+        with col_mid:
+            st.markdown(
+                f"<div style='text-align:center; padding-top:8px; color:#667;'>Halaman {current} dari {total_pages}</div>",
+                unsafe_allow_html=True,
+            )
+        with col_next:
+            if st.button("Berikutnya ➡️", disabled=(current >= total_pages), key=f"{state_key}_next", use_container_width=True):
+                current += 1
+
+    st.session_state[state_key] = current
+    start = (current - 1) * page_size
+    end = start + page_size
+    return start, end, current
